@@ -199,7 +199,11 @@
       folder: {
         value: "",
         validate: function (v) {
-          var mode = $("#node-input-outputMode").val();
+          // While the edit tray is open, read the live (unsaved) value from
+          // the DOM; otherwise (e.g. validity markers on the canvas) fall
+          // back to this node's last-deployed outputMode.
+          var el = $("#node-input-outputMode");
+          var mode = el.length ? el.val() : this.outputMode;
           return (
             mode === "message" || (typeof v === "string" && v.trim().length > 0)
           );

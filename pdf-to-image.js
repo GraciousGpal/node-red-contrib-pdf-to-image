@@ -23,6 +23,7 @@
 
 const path = require("path");
 const fs = require("fs");
+const fsp = fs.promises;
 
 module.exports = (RED) => {
 	// "mupdf" is ESM-only, so it cannot be require()'d from this CommonJS
@@ -38,10 +39,33 @@ module.exports = (RED) => {
 			return null;
 		});
 
+	const DPI_BOUNDS = [10, 2400];
+	const QUALITY_BOUNDS = [1, 100];
+	const VALID_ROTATIONS = [0, 90, 180, 270];
+
 	function clampInt(value, fallback, min, max) {
 		const n = parseInt(value, 10);
 		if (isNaN(n)) return fallback;
 		return Math.min(max, Math.max(min, n));
+	}
+
+	function clampRotation(value, fallback) {
+		const n = parseInt(value, 10);
+		return VALID_ROTATIONS.includes(n) ? n : fallback;
+	}
+
+	function normalizeFormat(value, fallback) {
+		const upper = String(value != null ? value : fallback).toUpperCase();
+		return upper === "JPEG" ? "JPEG" : "PNG";
+	}
+
+	async function pathExists(p) {
+		try {
+			await fsp.access(p);
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	function fmtMs(ms) {
@@ -89,9 +113,9 @@ module.exports = (RED) => {
 		return all;
 	}
 
-	function extractPdf(msg) {
+	async function extractPdf(msg) {
 		const payload = msg.payload;
-		if (payload == null) {
+		if (payload == null || payload === "") {
 			throw new Error(
 				"msg.payload is empty - send a PDF buffer, a file path, or a base64 PDF string",
 			);
@@ -119,9 +143,9 @@ module.exports = (RED) => {
 			) {
 				return { pdfBuffer: decoded, stem: fallbackName || "document" };
 			}
-			if (fs.existsSync(payload)) {
+			if (await pathExists(payload)) {
 				return {
-					pdfBuffer: fs.readFileSync(payload),
+					pdfBuffer: await fsp.readFile(payload),
 					stem: fallbackName || stemFromString(payload),
 				};
 			}
@@ -137,9 +161,12 @@ module.exports = (RED) => {
 					stem: fallbackName || stemFromString(payload.filename),
 				};
 			}
-			if (typeof payload.path === "string" && fs.existsSync(payload.path)) {
+			if (
+				typeof payload.path === "string" &&
+				(await pathExists(payload.path))
+			) {
 				return {
-					pdfBuffer: fs.readFileSync(payload.path),
+					pdfBuffer: await fsp.readFile(payload.path),
 					stem:
 						fallbackName || stemFromString(payload.filename || payload.path),
 				};
@@ -151,11 +178,11 @@ module.exports = (RED) => {
 		throw new Error(`unsupported msg.payload type: ${typeof payload}`);
 	}
 
-	function uniqueFilePath(folder, stem, pageNum, ext) {
+	async function uniqueFilePath(folder, stem, pageNum, ext) {
 		let name = `${stem}_page_${pageNum}.${ext}`;
 		let full = path.join(folder, name);
 		let counter = 1;
-		while (fs.existsSync(full)) {
+		while (await pathExists(full)) {
 			name = `${stem}_page_${pageNum}_${counter}.${ext}`;
 			full = path.join(folder, name);
 			counter += 1;
@@ -171,11 +198,10 @@ module.exports = (RED) => {
 			? config.pageMode
 			: "all";
 		node.pageRange = String(config.pageRange || "1");
-		node.dpi = clampInt(config.dpi, 200, 10, 2400);
-		node.format =
-			String(config.format || "PNG").toUpperCase() === "JPEG" ? "JPEG" : "PNG";
-		node.jpegQuality = clampInt(config.jpegQuality, 85, 1, 100);
-		node.rotation = parseInt(config.rotation, 10) || 0;
+		node.dpi = clampInt(config.dpi, 200, ...DPI_BOUNDS);
+		node.format = normalizeFormat(config.format, "PNG");
+		node.jpegQuality = clampInt(config.jpegQuality, 85, ...QUALITY_BOUNDS);
+		node.rotation = clampRotation(config.rotation, 0);
 		node.outputMode = ["message", "file", "both"].includes(config.outputMode)
 			? config.outputMode
 			: "message";
@@ -197,45 +223,45 @@ module.exports = (RED) => {
 						"the mupdf package failed to load - see the Node-RED log",
 					);
 
-				const { pdfBuffer, stem } = extractPdf(msg);
+				const { pdfBuffer, stem } = await extractPdf(msg);
 
 				const folder = node.outputMode !== "message" ? node.folder : null;
-				if (folder && !fs.existsSync(folder)) {
-					fs.mkdirSync(folder, { recursive: true });
+				if (node.outputMode !== "message" && !folder) {
+					throw new Error(
+						`outputMode is "${node.outputMode}" but no destination folder is configured`,
+					);
+				}
+				if (folder && !(await pathExists(folder))) {
+					await fsp.mkdir(folder, { recursive: true });
 				}
 
 				// per-message overrides, otherwise node config
 				const dpi = clampInt(
 					msg.dpi != null ? msg.dpi : node.dpi,
 					node.dpi,
-					10,
-					2400,
+					...DPI_BOUNDS,
 				);
-				const format =
-					String(msg.format || node.format).toUpperCase() === "JPEG"
-						? "JPEG"
-						: "PNG";
+				const format = normalizeFormat(msg.format || node.format, node.format);
 				const quality = clampInt(
 					msg.jpegQuality != null ? msg.jpegQuality : node.jpegQuality,
 					node.jpegQuality,
-					1,
-					100,
+					...QUALITY_BOUNDS,
 				);
-				const rotation =
-					parseInt(msg.rotation != null ? msg.rotation : node.rotation, 10) ||
-					0;
+				const rotation = clampRotation(
+					msg.rotation != null ? msg.rotation : node.rotation,
+					node.rotation,
+				);
 				const ext = format.toLowerCase();
 
 				const openStart = performance.now();
 				const doc = mupdf.Document.openDocument(pdfBuffer, "application/pdf");
+				const openMs = performance.now() - openStart;
 				const outStem = node.stem || stem;
 				let totalPages = 0;
-				let openMs = 0;
 				let renderMs = 0;
 				let saveMs = 0;
 				try {
 					totalPages = doc.countPages();
-					openMs = performance.now() - openStart;
 					if (!totalPages) throw new Error("the PDF contains no pages");
 
 					const pageNumbers = resolvePageNumbers(node, totalPages, msg);
@@ -253,7 +279,7 @@ module.exports = (RED) => {
 					});
 
 					const images = [];
-					const renderStart = performance.now();
+					const loopStart = performance.now();
 					for (const pageNum of pageNumbers) {
 						const pageStart = performance.now();
 						const page = doc.loadPage(pageNum - 1);
@@ -267,13 +293,34 @@ module.exports = (RED) => {
 							);
 							const bytes =
 								format === "JPEG" ? pixmap.asJPEG(quality) : pixmap.asPNG();
-							images.push({
+							const buffer = Buffer.from(bytes);
+							const img = {
 								page: pageNum,
 								width: pixmap.getWidth(),
 								height: pixmap.getHeight(),
-								buffer: Buffer.from(bytes),
 								renderMs: performance.now() - pageStart,
-							});
+							};
+
+							// write immediately so file-only mode never holds every
+							// page's buffer in memory at once
+							if (folder) {
+								const saveStart = performance.now();
+								const filePath = await uniqueFilePath(
+									folder,
+									outStem,
+									pageNum,
+									ext,
+								);
+								await fsp.writeFile(filePath, buffer);
+								img.path = filePath;
+								img.filename = path.basename(filePath);
+								saveMs += performance.now() - saveStart;
+							}
+							if (node.outputMode !== "file") {
+								img.buffer = buffer;
+							}
+
+							images.push(img);
 						} finally {
 							if (pixmap) pixmap.destroy();
 							page.destroy();
@@ -287,23 +334,10 @@ module.exports = (RED) => {
 						}
 					}
 
-					renderMs = performance.now() - renderStart;
+					renderMs = performance.now() - loopStart - saveMs;
 
 					if (!images.length)
 						throw new Error("no pages were rendered from the PDF");
-
-					// write files (file / both modes)
-					const saveStart = performance.now();
-					if (folder) {
-						for (const img of images) {
-							const filePath = uniqueFilePath(folder, outStem, img.page, ext);
-							fs.writeFileSync(filePath, img.buffer);
-							img.path = filePath;
-							img.filename = path.basename(filePath);
-						}
-					}
-
-					saveMs = performance.now() - saveStart;
 
 					const single = images.length === 1;
 					const payloads = images.map((img) =>
@@ -341,35 +375,16 @@ module.exports = (RED) => {
 					const payload = single ? payloads[0] : payloads;
 
 					if (node.splitPages && !single) {
-						const messages = images.map((img, i) => {
-							const m = { ...msg };
-							m.payload = payloads[i];
-							m.images = meta.images;
-							m.page = img.page;
-							m.pageCount = meta.pageCount;
-							m.pages = meta.pages;
-							m.dpi = meta.dpi;
-							m.format = meta.format;
-							m.rotation = meta.rotation;
-							m.filename = meta.filename;
-							m.durationMs = meta.durationMs;
-							m.timings = meta.timings;
-							if (meta.folder) m.folder = meta.folder;
-							return m;
-						});
+						const messages = images.map((img, i) => ({
+							...msg,
+							...meta,
+							payload: payloads[i],
+							page: img.page,
+						}));
 						send(messages);
 					} else {
+						Object.assign(msg, meta);
 						msg.payload = payload;
-						msg.images = meta.images;
-						msg.pageCount = meta.pageCount;
-						msg.pages = meta.pages;
-						msg.dpi = meta.dpi;
-						msg.format = meta.format;
-						msg.rotation = meta.rotation;
-						msg.filename = meta.filename;
-						msg.durationMs = meta.durationMs;
-						msg.timings = meta.timings;
-						if (meta.folder) msg.folder = meta.folder;
 						send(msg);
 					}
 

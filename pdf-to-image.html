@@ -1,0 +1,238 @@
+<script type="text/html" data-template-name="pdf-to-image">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-pageMode"
+      ><i class="fa fa-file-text-o"></i> Pages</label
+    >
+    <select id="node-input-pageMode" style="width:auto;">
+      <option value="all">All pages</option>
+      <option value="first">First page only</option>
+      <option value="last">Last page only</option>
+      <option value="range">Range…</option>
+    </select>
+    <input
+      type="text"
+      id="node-input-pageRange"
+      style="width:70px; display:none;"
+      placeholder="1-3"
+    />
+  </div>
+  <div class="form-row">
+    <label for="node-input-dpi"><i class="fa fa-search-plus"></i> DPI</label>
+    <input
+      type="number"
+      id="node-input-dpi"
+      min="10"
+      max="2400"
+      style="width:90px;"
+    />
+    <span class="node-input-hint" style="margin-left:10px; color:#999;"
+      >PDFs are 72&nbsp;DPI base; 200 = good print quality</span
+    >
+  </div>
+  <div class="form-row">
+    <label for="node-input-format"
+      ><i class="fa fa-picture-o"></i> Format</label
+    >
+    <select id="node-input-format" style="width:auto;">
+      <option value="PNG">PNG</option>
+      <option value="JPEG">JPEG</option>
+    </select>
+    <label for="node-input-jpegQuality" style="margin-left:24px;"
+      >JPEG quality</label
+    >
+    <input
+      type="number"
+      id="node-input-jpegQuality"
+      min="1"
+      max="100"
+      style="width:60px; display:none;"
+    />
+  </div>
+  <div class="form-row">
+    <label for="node-input-rotation"
+      ><i class="fa fa-repeat"></i> Rotation (clockwise)</label
+    >
+    <select id="node-input-rotation" style="width:auto;">
+      <option value="0">0°</option>
+      <option value="90">90°</option>
+      <option value="180">180°</option>
+      <option value="270">270°</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-outputMode"
+      ><i class="fa fa-sign-out"></i> Output</label
+    >
+    <select id="node-input-outputMode" style="width:auto;">
+      <option value="message">Image bytes in the message</option>
+      <option value="file">Write files to disk</option>
+      <option value="both">Both</option>
+    </select>
+  </div>
+  <div class="form-row" id="node-row-folder">
+    <label for="node-input-folder"
+      ><i class="fa fa-folder-open-o"></i> Destination folder</label
+    >
+    <input
+      type="text"
+      id="node-input-folder"
+      placeholder="/data/pdf-output (path inside the container)"
+    />
+  </div>
+  <div class="form-row" id="node-row-stem">
+    <label for="node-input-stem"
+      ><i class="fa fa-file-image-o"></i> File name stem (optional)</label
+    >
+    <input
+      type="text"
+      id="node-input-stem"
+      placeholder="defaults to the PDF file name"
+    />
+    <span class="node-input-hint" style="margin-left:10px; color:#999;"
+      >becomes &lt;stem&gt;_page_&lt;n&gt;.&lt;ext&gt;</span
+    >
+  </div>
+  <div class="form-row">
+    <label for="node-input-splitPages"
+      ><i class="fa fa-object-group"></i> One message per page</label
+    >
+    <input
+      type="checkbox"
+      id="node-input-splitPages"
+      style="display:inline-block; width:auto; vertical-align:middle;"
+    />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="pdf-to-image">
+  <p>
+    Converts a PDF into one image per page (PNG or JPEG) using the MuPDF
+    rendering engine. Same options as the PDFprocessor desktop app: page
+    selection, DPI, output format, JPEG quality and clockwise rotation.
+  </p>
+
+  <h3>Input</h3>
+  <p><code>msg.payload</code> can be:</p>
+  <ul>
+    <li>
+      a <b>Buffer</b> / Uint8Array with the PDF bytes (e.g. from a file-read or
+      base64-decode node)
+    </li>
+    <li>a <b>string path</b> to a PDF file on the container's filesystem</li>
+    <li>
+      a <b>base64 string</b> (auto-detected: the decoded bytes must carry the
+      <code>%PDF</code> magic, as produced by base64-encoding a PDF)
+    </li>
+    <li>
+      an object with <code>data</code> / <code>buffer</code> or
+      <code>path</code>
+    </li>
+  </ul>
+  <p>
+    Optional overrides per message: <code>msg.filename</code> (base name used
+    for output files), <code>msg.dpi</code>, <code>msg.format</code>,
+    <code>msg.rotation</code>, <code>msg.jpegQuality</code>,
+    <code>msg.pageMode</code> and <code>msg.pageRange</code>.
+  </p>
+
+  <h3>Output</h3>
+  <ul>
+    <li>
+      <code>msg.payload</code> — image bytes (Buffer) or an array of Buffers; in
+      <i>file</i> mode it is the written path (or array of paths) instead
+    </li>
+    <li>
+      <code>msg.images</code> — array of
+      <code>{ page, width, height, filename, path }</code> per page
+    </li>
+    <li>
+      <code>msg.pageCount</code>, <code>msg.pages</code>, <code>msg.dpi</code>,
+      <code>msg.format</code>, <code>msg.rotation</code>,
+      <code>msg.filename</code>, <code>msg.durationMs</code> (total, rounded)
+    </li>
+    <li>
+      <code>msg.timings</code> — phase breakdown in ms:
+      <code>{ openMs, renderMs, renderPerPageMs, saveMs, totalMs }</code>; each
+      <code>msg.images[i]</code> entry also carries its own
+      <code>renderMs</code>
+    </li>
+    <li>
+      The node logs the same breakdown (<code
+        >open / render (per-page) / save / total</code
+      >) at info level
+    </li>
+  </ul>
+  <p>
+    With <i>One message per page</i> enabled, a multi-page PDF emits one message
+    per page (<code>msg.page</code> is set) instead of a single message with an
+    array.
+  </p>
+
+  <h3>Files</h3>
+  <p>
+    File output uses the reference naming scheme
+    <code>&lt;stem&gt;_page_&lt;n&gt;.&lt;ext&gt;</code> (stem defaults to the
+    PDF file name) and appends a counter (<code>_1</code>, <code>_2</code>, …)
+    when the name is already taken. The destination folder is created if
+    missing. Remember the folder path is <b>inside the container</b> — use
+    <code>/data</code> for persistent storage.
+  </p>
+</script>
+
+<script type="text/javascript">
+  RED.nodes.registerType("pdf-to-image", {
+    category: "PDF",
+    color: "#C0392B",
+    defaults: {
+      name: { value: "" },
+      pageMode: { value: "all" },
+      pageRange: { value: "1" },
+      dpi: { value: 200, validate: RED.validators.number() },
+      format: { value: "PNG" },
+      jpegQuality: { value: 85, validate: RED.validators.number() },
+      rotation: { value: 0 },
+      outputMode: { value: "message" },
+      folder: {
+        value: "",
+        validate: function (v) {
+          var mode = $("#node-input-outputMode").val();
+          return (
+            mode === "message" || (typeof v === "string" && v.trim().length > 0)
+          );
+        },
+      },
+      stem: { value: "" },
+      splitPages: { value: false },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: "pdf-to-image.svg",
+    label: function () {
+      return this.name || "pdf to image";
+    },
+    paletteLabel: function () {
+      return "pdf to image";
+    },
+    oneditprepare: function () {
+      var updateVisibility = function () {
+        var pageMode = $("#node-input-pageMode").val();
+        var format = $("#node-input-format").val();
+        var outputMode = $("#node-input-outputMode").val();
+        var fileMode = outputMode === "file" || outputMode === "both";
+
+        $("#node-input-pageRange").toggle(pageMode === "range");
+        $("#node-input-jpegQuality").toggle(format === "JPEG");
+        $("#node-row-folder").toggle(fileMode);
+        $("#node-row-stem").toggle(fileMode);
+      };
+      $("#node-input-pageMode").on("change", updateVisibility);
+      $("#node-input-format").on("change", updateVisibility);
+      $("#node-input-outputMode").on("change", updateVisibility);
+      updateVisibility();
+    },
+  });
+</script>

@@ -1,9 +1,12 @@
 {
-  "name": "node-red-contrib-pdf-to-image",
+  "name": "@graciousstar/node-red-contrib-pdf-to-image",
   "version": "1.0.0",
   "description": "Convert a PDF into PNG/JPEG images (page selection, DPI, rotation). Uses MuPDF compiled to WebAssembly - no native dependencies.",
   "author": "GraciousGpal (https://github.com/GraciousGpal)",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "homepage": "https://github.com/GraciousGpal/node-red-contrib-pdf-to-image#readme",
   "repository": {
     "type": "git",

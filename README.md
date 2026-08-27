@@ -1,4 +1,4 @@
-# node-red-contrib-pdf-to-image
+# @graciousstar/node-red-contrib-pdf-to-image
 
 A Node-RED node that converts a PDF into PNG/JPEG images using
 [MuPDF](https://mupdf.readthedocs.io) compiled to **WebAssembly** (the
@@ -12,11 +12,15 @@ with collision counters.
 ## Install
 
 ```bash
-npm install node-red-contrib-pdf-to-image
+npm install @graciousstar/node-red-contrib-pdf-to-image
 ```
 
-Or install it from the Node-RED editor via **Manage palette → Install**.
-Restart Node-RED afterwards so the node is registered.
+Or install it from the Node-RED editor via **Manage palette → Install**,
+searching for the full scoped name. Restart Node-RED afterwards so the node
+is registered.
+
+The node appears in the palette as **pdf-to-image** under the *PDF* category;
+the npm scope does not change the node type, so existing flows keep working.
 
 Running Node-RED in Docker? Add it to the image's `package.json` and rebuild
 (`docker compose up -d --build`) rather than installing into a container that

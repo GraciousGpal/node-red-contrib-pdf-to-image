@@ -59,17 +59,17 @@ alongside the geometry needed to interpret it:
 
 ```javascript
 {
-  data: Buffer,       // BGRA bytes, 4 per pixel
+  data: Buffer,       // RGBA bytes, 4 per pixel
   width: number,
   height: number,
   channels: 4,
-  colorSpace: "BGRA",
+  colorSpace: "RGBA",
   dtype: "uint8"
 }
 ```
 
-PDFium renders BGRA natively, so nothing is converted. At rotation 0 the
-render buffer is passed through with no copy at all.
+PDFium renders RGBA, so nothing is converted. At rotation 0 the render buffer
+is passed through with no copy at all.
 
 Measured against PNG, 3 pages, median of 3:
 
@@ -165,6 +165,7 @@ no toolchain is required.
 
 | Version | Change |
 | --- | --- |
+| 1.6.1 | Fix red and blue being swapped in PNG and JPEG output |
 | 1.6.0 | RAW output format, which skips encoding entirely |
 | 1.5.0 | Rasterising moved from MuPDF to PDFium and encoding to a Rust encoder, making the package MIT throughout; transparent background option added |
 | 1.0.x | Initial releases, rasterising with MuPDF |

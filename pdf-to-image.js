@@ -5,8 +5,8 @@
  * WebAssembly) for rasterising and "@napi-rs/image" for encoding. Both are
  * permissively licensed, so this node carries no AGPL obligation.
  *
- * PDFium emits BGRA and cannot rotate during render, so the channel swap and
- * any 90/180/270 rotation are done here in a single pass over the bitmap.
+ * PDFium cannot rotate during render, so any 90/180/270 rotation is applied
+ * here in a single pass over the bitmap.
  *
  * Supported options:
  *   - page selection: all / first / last / range ("a-b", 1-indexed)
@@ -90,33 +90,31 @@ module.exports = (RED) => {
 	}
 
 	/**
-	 * PDFium hands back BGRA; the encoder wants RGBA. Rotation is not a render
-	 * option either, so both are folded into one pass to avoid walking a
-	 * multi-megabyte bitmap twice. Rotation is clockwise, matching the node's
-	 * documented behaviour.
+	 * Applies 90/180/270 rotation to an RGBA bitmap. PDFium has no rotation
+	 * render option, so it is done here. Rotation is clockwise, matching the
+	 * node's documented behaviour.
 	 */
-	function toRgbaRotated(src, width, height, rotation, swapChannels = true) {
-		// RAW output keeps PDFium's native BGRA, so with no rotation there is
-		// nothing to do and the render buffer is passed straight through.
-		// @hyzyla/pdfium builds it with HEAPU8.slice(), which copies, so the
-		// buffer is safe to hand downstream.
-		if (rotation === 0 && !swapChannels) {
+	function rotateRgba(src, width, height, rotation) {
+		// @hyzyla/pdfium hands back RGBA despite its "BGRA" colour-space naming;
+		// this was verified byte-for-byte against MuPDF's DeviceRGB output. No
+		// channel conversion is needed, so with no rotation the render buffer is
+		// passed straight through. It is built with HEAPU8.slice(), which copies,
+		// so handing it downstream is safe.
+		if (rotation === 0) {
 			return { data: src, width, height };
 		}
 
 		const out = Buffer.allocUnsafe(src.length);
 		const pixels = width * height;
-		const r = swapChannels ? 2 : 0;
-		const b = swapChannels ? 0 : 2;
 
-		if (rotation === 0 || rotation === 180) {
-			// 180 is the same walk as 0, reading the source backwards.
+		if (rotation === 180) {
+			// Same walk as 0, reading the source backwards.
 			for (let i = 0; i < pixels; i++) {
 				const s = i * 4;
-				const d = (rotation === 180 ? pixels - 1 - i : i) * 4;
-				out[d] = src[s + r];
+				const d = (pixels - 1 - i) * 4;
+				out[d] = src[s];
 				out[d + 1] = src[s + 1];
-				out[d + 2] = src[s + b];
+				out[d + 2] = src[s + 2];
 				out[d + 3] = src[s + 3];
 			}
 			return { data: out, width, height };
@@ -132,9 +130,9 @@ module.exports = (RED) => {
 				const dx = rotation === 90 ? y : height - 1 - y;
 				const dy = rotation === 90 ? width - 1 - x : x;
 				const d = (dy * outWidth + dx) * 4;
-				out[d] = src[s + r];
+				out[d] = src[s];
 				out[d + 1] = src[s + 1];
-				out[d + 2] = src[s + b];
+				out[d + 2] = src[s + 2];
 				out[d + 3] = src[s + 3];
 			}
 		}
@@ -357,12 +355,11 @@ module.exports = (RED) => {
 								.getPage(pageNum - 1)
 								.render({ scale, render: "bitmap", transparent });
 							const raw = format === "RAW";
-							const bitmap = toRgbaRotated(
+							const bitmap = rotateRgba(
 								rendered.data,
 								rendered.width,
 								rendered.height,
 								rotation,
-								!raw,
 							);
 							let buffer;
 							if (raw) {
@@ -397,9 +394,7 @@ module.exports = (RED) => {
 							};
 							if (raw) {
 								img.channels = 4;
-								// PDFium renders BGRA natively, so RAW skips the channel
-								// swap as well as the encode.
-								img.colorSpace = "BGRA";
+								img.colorSpace = "RGBA";
 								img.dtype = "uint8";
 							}
 

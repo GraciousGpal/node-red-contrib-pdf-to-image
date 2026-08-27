@@ -214,16 +214,16 @@
     the bitmap alongside the geometry needed to interpret it:
   </p>
   <pre>{
-  data: Buffer,       // BGRA bytes, 4 per pixel
+  data: Buffer,       // RGBA bytes, 4 per pixel
   width: number,
   height: number,
   channels: 4,
-  colorSpace: "BGRA",
+  colorSpace: "RGBA",
   dtype: "uint8"
 }</pre>
   <p>
-    PDFium renders BGRA natively, so nothing is converted. With rotation at 0
-    the render buffer is passed through untouched, with no copy at all.
+    PDFium renders RGBA, so nothing is converted. With rotation at 0 the
+    render buffer is passed through untouched, with no copy at all.
   </p>
   <p>
     Raw bytes have no image container, so in <b>file</b> output mode pages are

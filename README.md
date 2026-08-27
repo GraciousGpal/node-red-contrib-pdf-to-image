@@ -1,9 +1,14 @@
 # @graciousstar/node-red-contrib-pdf-to-image
 
+> **Branch build.** This is the `pdfium-mit` branch: MuPDF has been replaced
+> with PDFium plus a Rust encoder, so the package is MIT end to end with no
+> AGPL obligation. See **Licensing** below for what changed.
+
 A Node-RED node that converts a PDF into PNG/JPEG images using
-[MuPDF](https://mupdf.readthedocs.io) compiled to **WebAssembly** (the
-[`mupdf`](https://www.npmjs.com/package/mupdf) npm package) — no native
-dependencies, so it runs anywhere Node.js runs, including Alpine containers.
+[PDFium](https://pdfium.googlesource.com/pdfium/) compiled to **WebAssembly**
+(via [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium)) for
+rasterising, and [`@napi-rs/image`](https://www.npmjs.com/package/@napi-rs/image)
+for PNG/JPEG encoding.
 
 Supports page selection, DPI scaling, PNG/JPEG output with quality,
 clockwise rotation, and the `<stem>_page_<n>.<ext>` file naming scheme
@@ -40,7 +45,15 @@ gets replaced.
 
 Optional per-message overrides: `msg.filename` (output file stem),
 `msg.dpi`, `msg.format`, `msg.rotation`, `msg.jpegQuality`,
-`msg.pageMode`, `msg.pageRange`.
+`msg.pageMode`, `msg.pageRange`, `msg.transparent`.
+
+### Transparent background
+
+Pages render onto white by default. Enable **Transparent background** (or set
+`msg.transparent`) to keep the page background transparent in the PNG alpha
+channel. JPEG has no alpha channel, so the option is ignored with a warning
+when the output format is JPEG — otherwise a transparent background would
+silently come out black.
 
 ## Output
 
@@ -48,7 +61,7 @@ Optional per-message overrides: `msg.filename` (output file stem),
   **file** mode it is the written path / array of paths instead
 - `msg.images` — array of `{ page, width, height, filename, path }`
 - `msg.pageCount`, `msg.pages`, `msg.dpi`, `msg.format`, `msg.rotation`,
-  `msg.filename`, `msg.durationMs`
+  `msg.filename`, `msg.transparent`, `msg.durationMs`
 - `msg.timings` — phase breakdown in ms:
   `{ openMs, renderMs, renderPerPageMs, saveMs, totalMs }`; each
   `msg.images[i]` entry also carries its own `renderMs`
@@ -69,9 +82,10 @@ Optional per-message overrides: `msg.filename` (output file stem),
 
 ## Notes
 
-- Requires Node.js >= 18 (dynamic `import()` of the ESM-only `mupdf` package).
-- JPEG output uses MuPDF's `asJPEG(quality)`; progressive and optimize
-  flags are not exposed.
+- Requires Node.js >= 18. Both engine packages expose CommonJS entry points.
+- JPEG output uses `@napi-rs/image`'s `jpegSync(quality)`. At the same
+  quality setting it currently produces larger files than the MuPDF build
+  did — see **Known gaps** below.
 - The destination folder is a path on **whatever machine runs Node-RED**, not
   on the machine with the browser open. Node-RED must have write permission to
   it; the folder is created if missing. In Docker that path is inside the
@@ -80,130 +94,74 @@ Optional per-message overrides: `msg.filename` (output file stem),
 
 ## Licensing
 
-The code in this package is **MIT** (see `LICENSE`). The rendering engine it
-depends on is not.
+Everything in this package, and every dependency it pulls in, is permissively
+licensed:
 
-[`mupdf`](https://www.npmjs.com/package/mupdf) is **AGPL-3.0-or-later**, and
-npm installs it alongside this node. What that means in practice:
-
-- This package does not bundle or redistribute MuPDF — it calls it at
-  runtime — so the MIT license above covers the wrapper code only.
-- The *running combination* is covered by the AGPL. Node-RED is normally
-  reachable over a network, and AGPL section 13 entitles users who interact
-  with a program remotely to the corresponding source of that combined work.
-- Artifex, MuPDF's owner, sells commercial licenses for deployments where AGPL
-  terms do not fit.
-
-If you are running this in an open-source or internal-only Node-RED project,
-this needs no action from you. If you are embedding it in a closed-source
-product or a hosted service you sell, read the AGPL terms first.
-
-## Roadmap
-
-### Relicensing the whole stack under MIT
-
-The AGPL obligation comes entirely from the rendering engine, not from any
-code in this package — so replacing the engine removes it. The intended
-path is [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium)
-(MIT wrapper around Google's BSD-3-Clause PDFium).
-
-PDFium renders to a raw BGRA bitmap, so PNG encoding — which MuPDF gives us
-for free via `asPNG()` — becomes this package's job. Benchmarking says the
-engine swap is close to free, and the encoder choice decides everything.
-
-#### Method
-
-Two PDFs (a graphics-heavy 3.3 MB sample and a text/vector-heavy 4.2 MB
-document) at 100/200/300 DPI, median of 3 runs, Node 24, WASM library
-initialisation hoisted out of the timing. Encoder figures below are page 0
-of the sample at 200 DPI (2172x1497); ratios are against `mupdf` +
-`asPNG()` at 63 ms / 512 KB.
-
-#### Rasterising: MuPDF and PDFium are the only serious options
-
-| Engine | sample @200 | text doc @200 | License |
-| --- | --- | --- | --- |
-| `mupdf` | 1.00x | 1.00x | AGPL-3.0 |
-| PDFium via `@hyzyla/pdfium` | 1.41x | 1.09x | BSD-3-Clause |
-| `pdf.js` + `@napi-rs/canvas` | 6.21x | 4.89x | Apache-2.0 |
-
-PDFium is at parity across most content, though it runs 2.45x slower on
-heavy vector graphics at 300 DPI. `pdf.js` is 3.8x – 7.7x slower — it
-interprets PDF content streams in JavaScript, and no canvas backend changes
-that. `node-poppler` shells out to a CLI binary and is GPL.
-`@embedpdf/pdfium` is the same engine behind a different binding.
-
-**There is no faster rasteriser than what we already have.**
-
-#### Encoding: this is the real decision
-
-| Encoder | Type | Time | Size | License |
-| --- | --- | --- | --- | --- |
-| `mupdf` `asPNG()` (current) | WASM | 1.00x | 1.00x | AGPL-3.0 |
-| [`@napi-rs/image`](https://www.npmjs.com/package/@napi-rs/image) | native + WASI | **0.42x** | 1.00x | MIT |
-| `libdeflate` + ~60 lines (below) | **pure WASM** | **0.83x** | 1.00x | MIT |
-| `libdeflate`, level 1 | pure WASM | 0.45x | 1.17x | MIT |
-| [`@jsquash/png`](https://www.npmjs.com/package/@jsquash/png) | WASM | 0.32x | 2.82x | Apache-2.0 |
-| [`fast-png`](https://www.npmjs.com/package/fast-png) | pure JS | 2.16x | 0.96x | MIT |
-| `sharp` (libvips) | native | 2.19x | **0.53x** | Apache-2.0 |
-| `pngjs` | pure JS | 2.9x | 1.53x | MIT |
-
-Whole-pipeline results (PDFium + encoder, 3 pages, both PDFs, all DPIs):
-
-| Pipeline | Time vs current | Size vs current |
+| Component | Role | License |
 | --- | --- | --- |
-| PDFium + `@napi-rs/image` | 0.54x – 1.08x | 0.95x – 1.29x |
-| PDFium + `@jsquash/png` | 0.61x – 0.93x | 2.5x – 4.1x |
-| PDFium + `fast-png` | 1.9x – 2.7x | 0.96x – 1.33x |
+| this package | node | MIT |
+| `@hyzyla/pdfium` | rasterising | MIT (over BSD-3-Clause PDFium) |
+| `@napi-rs/image` | PNG/JPEG encoding | MIT |
 
-Notes on the rejected options:
+There is no AGPL obligation. The `main` branch depends on `mupdf`
+(AGPL-3.0-or-later), which covers the running combination and requires
+offering source to users who reach it over a network; that constraint does
+not apply here.
 
-- **`oxipng` is not viable in a render path.** Level 0 costs 3.3x – 4.9x for
-  1.06x – 1.18x the size; level 2 costs 22x – 24x; level 3 costs 67x – 72x
-  for ~1% over level 2. Encoding with `@jsquash/png` then optimising with
-  `oxipng` lands at 23x – 25x.
-- **`@jsquash/png` exposes no quality knob** (`encode(data, width, height,
-  bitDepth)`), which is why it is fast and why its files are 3x – 4x larger.
-- **`sharp` produces by far the smallest files** — roughly half of everything
-  else — but is 2x at 200 DPI and 6.4x at 300 DPI, and is native without a
-  WASM fallback.
-- **`fpnge`, `zune-png` and `mtpng` are not published to npm.** Using them
-  means compiling to WASM yourself, which `libdeflate` makes unnecessary.
-- **MuPDF's `asPNG()` is genuinely strong.** At 300 DPI it produced 377 KB
-  where every permissive encoder needed 400 – 500 KB. This is not a weak
-  component being replaced.
+`@napi-rs/image` is a Node-API addon rather than pure WebAssembly. It ships
+13 prebuilt targets — including `linux-x64-musl` and `linux-arm64-musl`
+(verified in an Alpine container), `linux-arm-gnueabihf` for 32-bit Raspberry
+Pi, and a `wasm32-wasi` fallback — so nothing is compiled at install time and
+no toolchain is required.
 
-#### The two candidate paths
+## Verification
 
-**`@napi-rs/image`** is fastest and size-neutral. It is an N-API addon, but
-ships 13 prebuilt targets including `linux-x64-musl` and `linux-arm64-musl`
-(verified working in an Alpine container), `linux-arm-gnueabihf` for 32-bit
-Raspberry Pi, and a `wasm32-wasi` fallback for anything unlisted. Nothing
-compiles at install time. Adopting it means rewording the "no native
-dependencies" claim above, though the practical "runs anywhere" property
-holds.
+Rendered output was compared against the MuPDF implementation by
+downsampling both to an 8x8 luminance grid, which tolerates antialiasing and
+the 1px size difference but not a wrong orientation:
 
-**`libdeflate` + a minimal PNG writer** keeps the pure-WASM story completely
-intact and still beats the current implementation: same file size, 17%
-faster. A PNG is filtered scanlines wrapped in a zlib stream, so the writer
-is roughly 60 lines over
-[`libdeflate`](https://www.npmjs.com/package/libdeflate). Use filter `None`
-at level 6; level 12 is a trap, costing 29x for 15% size. The cost is owning
-a PNG encoder — the prototype measured here handles only 8-bit RGB, with no
-interlacing and a fixed filter, so it would need hardening and tests.
+| Rotation | Mean difference (0-255) | Result |
+| --- | --- | --- |
+| 0 | 3.09 | match |
+| 90 | 3.07 | match |
+| 180 | 3.09 | match |
+| 270 | 3.11 | match |
 
-#### Remaining work
+A control comparing rot0 against rot90 from the same engine scores 43.0,
+confirming the check can actually detect a mismatch. The residual ~3.1 is
+rasteriser variance, present at rotation 0 where no rotation is applied.
 
-- Swap the engine calls in `pdf-to-image.js`. MuPDF is touched in only a few
-  places: document open, `countPages()`, `Matrix` DPI scaling and rotation,
-  and pixmap encoding.
-- Pick an encoder per the trade-off above, and note PDFium only emits BGRA,
-  so a channel repack is required on every page either way.
-- Supply a JPEG encoder. `asJPEG(quality)` disappears with MuPDF; `jpeg-js`
-  (BSD-3-Clause) is the permissive equivalent, and is not yet benchmarked.
-- Regenerate any golden templates. PDFium's output is consistently **1px
-  smaller** in each dimension (e.g. 1086x748 against MuPDF's 1087x749) due to
-  different page-size rounding, so downstream template matching would need
-  rebaselining.
+Measured against the MuPDF build on the same machine, 3 pages at 200 DPI:
+332 ms against 446 ms, a 26% improvement.
 
-Until this lands, treat the effective license of a deployed instance as AGPL.
+## Known gaps
+
+- **JPEG files are larger at equal quality.** The quality dial is not
+  mis-scaled — both encoders land at the same PSNR for the same setting
+  (q85 gives 40.17 dB here against MuPDF's 40.34 dB). `@napi-rs/image` is
+  simply less space-efficient: 17% larger on graphics-heavy pages and 31% –
+  34% larger on text-heavy ones, measured at matched PSNR.
+
+  The encoder itself is **2.3x faster** (31 ms against 74 ms for a
+  1629x1122 page); where end-to-end JPEG timings look slower it is PDFium's
+  rasterising of that page, not the encoding.
+
+  Alternatives were measured and rejected:
+
+  | Approach | Result |
+  | --- | --- |
+  | `compressJpegSync` (MozJPEG recompress) | No gain — 350 KB vs 351 KB at the same PSNR, 2.4x slower. Re-encoding an already-lossy JPEG cancels the benefit. |
+  | `@jsquash/jpeg` (MozJPEG from raw pixels) | ~6% smaller at matched PSNR but **7x – 11x slower** (232 – 354 ms). |
+
+  No permissive JPEG encoder tested matches MuPDF's efficiency at an
+  acceptable speed. If output size matters more than throughput for your
+  JPEG usage, this branch is a regression; for PNG it is a clear win.
+
+- **Output is 1px smaller in each dimension** (e.g. 2172x1497 against
+  2173x1498) because PDFium rounds page sizes differently. Anything holding a
+  golden image produced by the MuPDF build would need rebaselining. Note this
+  does not affect the NodeRed-Test palette repo, whose `golden-compare`
+  template is a camera capture and is not fed from this node.
+- The installed binary is 16.5 MB, against 12.5 KB for the `main` package.
+- Installing with `--omit=optional` leaves `@napi-rs/image` unable to find
+  its native binding, failing at require time rather than install time.

@@ -106,11 +106,24 @@
       style="display:inline-block; width:auto; vertical-align:middle;"
     />
   </div>
+  <div class="form-row" id="node-row-transparent">
+    <label for="node-input-transparent"
+      ><i class="fa fa-adjust"></i> Transparent background</label
+    >
+    <input
+      type="checkbox"
+      id="node-input-transparent"
+      style="display:inline-block; width:auto; vertical-align:middle;"
+    />
+    <span class="node-input-hint" style="margin-left:10px; color:#999;"
+      >PNG only</span
+    >
+  </div>
 </script>
 
 <script type="text/html" data-help-name="pdf-to-image">
   <p>
-    Converts a PDF into one image per page (PNG or JPEG) using the MuPDF
+    Converts a PDF into one image per page (PNG or JPEG) using the PDFium
     rendering engine. Options: page selection, DPI, output format, JPEG quality and
     clockwise rotation.
   </p>
@@ -188,12 +201,22 @@
     the container.
   </p>
 
+  <h3>Transparent background</h3>
+  <p>
+    By default pages render onto white. Enabling <b>Transparent background</b>
+    keeps the page background transparent in the PNG alpha channel, which is
+    useful when compositing the page over something else. JPEG has no alpha
+    channel, so the option is ignored (with a warning) when the output format
+    is JPEG. Override per message with <code>msg.transparent</code>.
+  </p>
+
   <h3>Licensing</h3>
   <p>
-    This node is MIT licensed, but its rendering engine
-    (<a href="https://www.npmjs.com/package/mupdf">mupdf</a>) is
-    AGPL-3.0-or-later, which covers the running combination. See the package
-    README before using it in a closed-source product or hosted service.
+    MIT end to end: this node, the
+    <a href="https://www.npmjs.com/package/@hyzyla/pdfium">PDFium</a>
+    rasteriser and the
+    <a href="https://www.npmjs.com/package/@napi-rs/image">@napi-rs/image</a>
+    encoder are all permissively licensed, so there is no AGPL obligation.
   </p>
 </script>
 
@@ -225,6 +248,7 @@
       },
       stem: { value: "" },
       splitPages: { value: false },
+      transparent: { value: false },
     },
     inputs: 1,
     outputs: 1,

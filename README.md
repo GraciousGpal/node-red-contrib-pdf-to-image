@@ -105,64 +105,105 @@ product or a hosted service you sell, read the AGPL terms first.
 The AGPL obligation comes entirely from the rendering engine, not from any
 code in this package — so replacing the engine removes it. The intended
 path is [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium)
-(MIT wrapper around Google's BSD-3-Clause PDFium), which is also WebAssembly
-and so preserves the no-native-dependencies property that lets this node run
-anywhere Node.js does.
+(MIT wrapper around Google's BSD-3-Clause PDFium).
 
 PDFium renders to a raw BGRA bitmap, so PNG encoding — which MuPDF gives us
-for free via `asPNG()` — becomes this package's job. Choosing that encoder
-turns out to matter far more than choosing the engine.
+for free via `asPNG()` — becomes this package's job. Benchmarking says the
+engine swap is close to free, and the encoder choice decides everything.
 
-#### Measured
+#### Method
 
 Two PDFs (a graphics-heavy 3.3 MB sample and a text/vector-heavy 4.2 MB
-document), first 3 pages, median of 3 runs, Node 24, WASM library
-initialisation hoisted out of the timing:
+document) at 100/200/300 DPI, median of 3 runs, Node 24, WASM library
+initialisation hoisted out of the timing. Encoder figures below are page 0
+of the sample at 200 DPI (2172x1497); ratios are against `mupdf` +
+`asPNG()` at 63 ms / 512 KB.
 
-| Pipeline | Time vs current | PNG size vs current |
+#### Rasterising: MuPDF and PDFium are the only serious options
+
+| Engine | sample @200 | text doc @200 | License |
+| --- | --- | --- | --- |
+| `mupdf` | 1.00x | 1.00x | AGPL-3.0 |
+| PDFium via `@hyzyla/pdfium` | 1.41x | 1.09x | BSD-3-Clause |
+| `pdf.js` + `@napi-rs/canvas` | 6.21x | 4.89x | Apache-2.0 |
+
+PDFium is at parity across most content, though it runs 2.45x slower on
+heavy vector graphics at 300 DPI. `pdf.js` is 3.8x – 7.7x slower — it
+interprets PDF content streams in JavaScript, and no canvas backend changes
+that. `node-poppler` shells out to a CLI binary and is GPL.
+`@embedpdf/pdfium` is the same engine behind a different binding.
+
+**There is no faster rasteriser than what we already have.**
+
+#### Encoding: this is the real decision
+
+| Encoder | Type | Time | Size | License |
+| --- | --- | --- | --- | --- |
+| `mupdf` `asPNG()` (current) | WASM | 1.00x | 1.00x | AGPL-3.0 |
+| [`@napi-rs/image`](https://www.npmjs.com/package/@napi-rs/image) | native + WASI | **0.42x** | 1.00x | MIT |
+| `libdeflate` + ~60 lines (below) | **pure WASM** | **0.83x** | 1.00x | MIT |
+| `libdeflate`, level 1 | pure WASM | 0.45x | 1.17x | MIT |
+| [`@jsquash/png`](https://www.npmjs.com/package/@jsquash/png) | WASM | 0.32x | 2.82x | Apache-2.0 |
+| [`fast-png`](https://www.npmjs.com/package/fast-png) | pure JS | 2.16x | 0.96x | MIT |
+| `sharp` (libvips) | native | 2.19x | **0.53x** | Apache-2.0 |
+| `pngjs` | pure JS | 2.9x | 1.53x | MIT |
+
+Whole-pipeline results (PDFium + encoder, 3 pages, both PDFs, all DPIs):
+
+| Pipeline | Time vs current | Size vs current |
 | --- | --- | --- |
-| `mupdf` + `asPNG()` (current) | 1.00x | 1.00x |
-| PDFium + [`@jsquash/png`](https://www.npmjs.com/package/@jsquash/png) | **0.63x – 0.93x** | 2.5x – 4.1x |
-| PDFium + [`fast-png`](https://www.npmjs.com/package/fast-png) | 2.1x – 2.8x | 0.96x – 1.33x |
+| PDFium + `@napi-rs/image` | 0.54x – 1.08x | 0.95x – 1.29x |
+| PDFium + `@jsquash/png` | 0.61x – 0.93x | 2.5x – 4.1x |
+| PDFium + `fast-png` | 1.9x – 2.7x | 0.96x – 1.33x |
 
-Findings:
+Notes on the rejected options:
 
-- **Rasterising is at parity.** PDFium is within 0.86x – 1.3x of MuPDF on the
-  text-heavy document and up to 2.7x slower on heavy vector graphics. The
-  engine was never the bottleneck.
-- **The encoder decides everything.** At 300 DPI, PNG encoding is ~90% of the
-  total. `@jsquash/png` (WASM) beats MuPDF's own C encoder by 2x – 2.6x, but
-  spends almost no effort compressing, so files run 2.5x – 4.1x larger. It
-  exposes no quality knob: the API is `encode(data, width, height, bitDepth)`.
-- **`fast-png` is the size-neutral option**, matching MuPDF's output within
-  a third at 2x – 3x the time. It is pure JS.
-- **`oxipng` is not viable in a render path.** Level 0 costs 3.3x – 4.9x
-  MuPDF's time for 1.06x – 1.18x the size; level 2 costs 22x – 24x; level 3
-  costs 67x – 72x for ~1% over level 2. Encoding with `@jsquash/png` and then
-  optimising with `oxipng` lands at 23x – 25x, so the speed lead cannot be
-  spent to buy the size back.
+- **`oxipng` is not viable in a render path.** Level 0 costs 3.3x – 4.9x for
+  1.06x – 1.18x the size; level 2 costs 22x – 24x; level 3 costs 67x – 72x
+  for ~1% over level 2. Encoding with `@jsquash/png` then optimising with
+  `oxipng` lands at 23x – 25x.
+- **`@jsquash/png` exposes no quality knob** (`encode(data, width, height,
+  bitDepth)`), which is why it is fast and why its files are 3x – 4x larger.
+- **`sharp` produces by far the smallest files** — roughly half of everything
+  else — but is 2x at 200 DPI and 6.4x at 300 DPI, and is native without a
+  WASM fallback.
+- **`fpnge`, `zune-png` and `mtpng` are not published to npm.** Using them
+  means compiling to WASM yourself, which `libdeflate` makes unnecessary.
 - **MuPDF's `asPNG()` is genuinely strong.** At 300 DPI it produced 377 KB
   where every permissive encoder needed 400 – 500 KB. This is not a weak
   component being replaced.
+
+#### The two candidate paths
+
+**`@napi-rs/image`** is fastest and size-neutral. It is an N-API addon, but
+ships 13 prebuilt targets including `linux-x64-musl` and `linux-arm64-musl`
+(verified working in an Alpine container), `linux-arm-gnueabihf` for 32-bit
+Raspberry Pi, and a `wasm32-wasi` fallback for anything unlisted. Nothing
+compiles at install time. Adopting it means rewording the "no native
+dependencies" claim above, though the practical "runs anywhere" property
+holds.
+
+**`libdeflate` + a minimal PNG writer** keeps the pure-WASM story completely
+intact and still beats the current implementation: same file size, 17%
+faster. A PNG is filtered scanlines wrapped in a zlib stream, so the writer
+is roughly 60 lines over
+[`libdeflate`](https://www.npmjs.com/package/libdeflate). Use filter `None`
+at level 6; level 12 is a trap, costing 29x for 15% size. The cost is owning
+a PNG encoder — the prototype measured here handles only 8-bit RGB, with no
+interlacing and a fixed filter, so it would need hardening and tests.
 
 #### Remaining work
 
 - Swap the engine calls in `pdf-to-image.js`. MuPDF is touched in only a few
   places: document open, `countPages()`, `Matrix` DPI scaling and rotation,
   and pixmap encoding.
-- Pick the encoder against the deployment. `@jsquash/png` makes the node
-  *faster* than it is today and suits **message** output mode, where buffers
-  are passed in memory to the next node. `fast-png` suits **file** output
-  mode, where a 3x – 4x larger PNG per page is a real cost on disk.
+- Pick an encoder per the trade-off above, and note PDFium only emits BGRA,
+  so a channel repack is required on every page either way.
 - Supply a JPEG encoder. `asJPEG(quality)` disappears with MuPDF; `jpeg-js`
   (BSD-3-Clause) is the permissive equivalent, and is not yet benchmarked.
 - Regenerate any golden templates. PDFium's output is consistently **1px
   smaller** in each dimension (e.g. 1086x748 against MuPDF's 1087x749) due to
   different page-size rounding, so downstream template matching would need
   rebaselining.
-
-Avoid `sharp` despite its speed: it is native, and would end the "runs
-anywhere Node.js runs, including Alpine" property that makes this node
-portable.
 
 Until this lands, treat the effective license of a deployed instance as AGPL.

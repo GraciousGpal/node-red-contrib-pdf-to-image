@@ -110,7 +110,7 @@
 
 <script type="text/html" data-help-name="pdf-to-image">
   <p>
-    Converts a PDF into one image per page (PNG or JPEG) using the MuPDF
+    Converts a PDF into one image per page (PNG or JPEG) using the PDFium
     rendering engine. Options: page selection, DPI, output format, JPEG quality and
     clockwise rotation.
   </p>
@@ -190,10 +190,11 @@
 
   <h3>Licensing</h3>
   <p>
-    This node is MIT licensed, but its rendering engine
-    (<a href="https://www.npmjs.com/package/mupdf">mupdf</a>) is
-    AGPL-3.0-or-later, which covers the running combination. See the package
-    README before using it in a closed-source product or hosted service.
+    MIT end to end: this node, the
+    <a href="https://www.npmjs.com/package/@hyzyla/pdfium">PDFium</a>
+    rasteriser and the
+    <a href="https://www.npmjs.com/package/@napi-rs/image">@napi-rs/image</a>
+    encoder are all permissively licensed, so there is no AGPL obligation.
   </p>
 </script>
 

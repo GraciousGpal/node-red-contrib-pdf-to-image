@@ -1,6 +1,6 @@
 {
   "name": "@graciousstar/node-red-contrib-pdf-to-image",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Convert a PDF into PNG/JPEG images (page selection, DPI, rotation). Uses PDFium (WebAssembly) and a Rust encoder - fully MIT-compatible, no AGPL.",
   "author": "GraciousGpal (https://github.com/GraciousGpal)",
   "license": "MIT",
@@ -22,6 +22,8 @@
     "png",
     "jpeg",
     "jpg",
+    "raw",
+    "bitmap",
     "convert",
     "render",
     "pdfium"

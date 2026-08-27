@@ -43,6 +43,53 @@ Optional per-message overrides: `msg.filename` (output file stem),
 `msg.dpi`, `msg.format`, `msg.rotation`, `msg.jpegQuality`,
 `msg.pageMode`, `msg.pageRange`, `msg.transparent`.
 
+### RAW output (fastest)
+
+Setting the format to **RAW** skips encoding entirely and hands the rendered
+bitmap to the next node. Encoding is most of the cost of a render, so this is
+the fastest option when the image feeds another processing node rather than
+being written out or displayed.
+
+`msg.payload` becomes an object rather than a Buffer, in the shape
+[`node-red-contrib-image-tools`](https://www.npmjs.com/package/@rosepetal/node-red-contrib-image-tools)
+expects:
+
+```javascript
+{
+  data: Buffer,       // BGRA bytes, 4 per pixel
+  width: number,
+  height: number,
+  channels: 4,
+  colorSpace: "BGRA",
+  dtype: "uint8"
+}
+```
+
+PDFium renders BGRA natively, which that node lists among its supported colour
+spaces, so nothing is converted. At rotation 0 the render buffer is passed
+through with no copy at all.
+
+Measured against PNG, 3 pages, median of 3:
+
+| DPI | PNG | RAW | Speed-up |
+| --- | --- | --- | --- |
+| 150 | 224 ms | 118 ms | 1.9x |
+| 200 | 272 ms | 142 ms | 1.9x |
+| 300 | 502 ms | 200 ms | 2.5x |
+
+On a text-heavy document the gain reaches 3.1x at 300 DPI.
+
+**Watch the memory.** Raw bitmaps are large: three pages at 300 DPI is roughly
+**84 MB** of payload against 2.5 MB as PNG, and a text-heavy A4 document
+reaches ~99 MB. Node-RED holds that in the message, so raise the heap
+(`NODE_OPTIONS=--max-old-space-size=...`) or convert a page at a time before
+using RAW on large documents at high DPI.
+
+Two further caveats: image viewer and preview nodes generally cannot display
+raw bytes, so use PNG for those; and raw bytes have no container, so **file**
+output mode writes `.bin` files with the geometry travelling on
+`msg.images[]` instead.
+
 ### Transparent background
 
 Pages render onto white by default. Enable **Transparent background** (or set
@@ -53,9 +100,11 @@ silently come out black.
 
 ## Output
 
-- `msg.payload` — image bytes (Buffer) or an array of Buffers; in
-  **file** mode it is the written path / array of paths instead
-- `msg.images` — array of `{ page, width, height, filename, path }`
+- `msg.payload` — image bytes (Buffer) or an array of Buffers; for **RAW**
+  an image object (or array of them) as described above; in **file** mode it
+  is the written path / array of paths instead
+- `msg.images` — array of `{ page, width, height, filename, path }`; RAW
+  entries also carry `channels`, `colorSpace` and `dtype`
 - `msg.pageCount`, `msg.pages`, `msg.dpi`, `msg.format`, `msg.rotation`,
   `msg.filename`, `msg.transparent`, `msg.durationMs`
 - `msg.timings` — phase breakdown in ms:

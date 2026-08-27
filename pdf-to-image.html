@@ -40,6 +40,7 @@
     <select id="node-input-format" style="width:auto;">
       <option value="PNG">PNG</option>
       <option value="JPEG">JPEG</option>
+      <option value="RAW">RAW (no encoding)</option>
     </select>
     <label for="node-input-jpegQuality" style="margin-left:24px;"
       >JPEG quality</label
@@ -199,6 +200,37 @@
     it. Under Docker that means a path inside the container — point it at a
     mounted volume such as <code>/data</code> if the images need to outlive
     the container.
+  </p>
+
+  <h3>RAW output</h3>
+  <p>
+    <b>RAW</b> skips image encoding entirely and passes the rendered bitmap
+    straight to the next node. Encoding is most of the cost of a render, so
+    this is by far the fastest option when the image feeds another processing
+    node rather than being written out or displayed.
+  </p>
+  <p>
+    <code>msg.payload</code> becomes an object rather than a Buffer, in the
+    shape <code>node-red-contrib-image-tools</code> expects:
+  </p>
+  <pre>{
+  data: Buffer,       // BGRA bytes, 4 per pixel
+  width: number,
+  height: number,
+  channels: 4,
+  colorSpace: "BGRA",
+  dtype: "uint8"
+}</pre>
+  <p>
+    PDFium renders BGRA natively, so nothing is converted. With rotation at 0
+    the render buffer is passed through untouched, with no copy at all.
+  </p>
+  <p>
+    Raw bytes have no image container, so in <b>file</b> output mode pages are
+    written as <code>.bin</code> and the geometry travels on
+    <code>msg.images[]</code> instead. Most flows should use <i>message</i>
+    output mode with RAW. Image viewer and preview nodes generally cannot
+    display raw bytes &mdash; use PNG for those.
   </p>
 
   <h3>Transparent background</h3>

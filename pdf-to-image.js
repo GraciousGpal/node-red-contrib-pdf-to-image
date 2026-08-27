@@ -61,7 +61,12 @@ module.exports = (RED) => {
 
 	function normalizeFormat(value, fallback) {
 		const upper = String(value != null ? value : fallback).toUpperCase();
-		return upper === "JPEG" ? "JPEG" : "PNG";
+		if (upper === "JPEG") return "JPEG";
+		// RAW hands the rendered bitmap straight to the next node with no
+		// encoding at all, which is by far the fastest option in a
+		// processing chain. See the README for the payload shape.
+		if (upper === "RAW") return "RAW";
+		return "PNG";
 	}
 
 	async function pathExists(p) {
@@ -90,18 +95,28 @@ module.exports = (RED) => {
 	 * multi-megabyte bitmap twice. Rotation is clockwise, matching the node's
 	 * documented behaviour.
 	 */
-	function toRgbaRotated(src, width, height, rotation) {
+	function toRgbaRotated(src, width, height, rotation, swapChannels = true) {
+		// RAW output keeps PDFium's native BGRA, so with no rotation there is
+		// nothing to do and the render buffer is passed straight through.
+		// @hyzyla/pdfium builds it with HEAPU8.slice(), which copies, so the
+		// buffer is safe to hand downstream.
+		if (rotation === 0 && !swapChannels) {
+			return { data: src, width, height };
+		}
+
 		const out = Buffer.allocUnsafe(src.length);
 		const pixels = width * height;
+		const r = swapChannels ? 2 : 0;
+		const b = swapChannels ? 0 : 2;
 
 		if (rotation === 0 || rotation === 180) {
 			// 180 is the same walk as 0, reading the source backwards.
 			for (let i = 0; i < pixels; i++) {
 				const s = i * 4;
 				const d = (rotation === 180 ? pixels - 1 - i : i) * 4;
-				out[d] = src[s + 2];
+				out[d] = src[s + r];
 				out[d + 1] = src[s + 1];
-				out[d + 2] = src[s];
+				out[d + 2] = src[s + b];
 				out[d + 3] = src[s + 3];
 			}
 			return { data: out, width, height };
@@ -117,9 +132,9 @@ module.exports = (RED) => {
 				const dx = rotation === 90 ? y : height - 1 - y;
 				const dy = rotation === 90 ? width - 1 - x : x;
 				const d = (dy * outWidth + dx) * 4;
-				out[d] = src[s + 2];
+				out[d] = src[s + r];
 				out[d + 1] = src[s + 1];
-				out[d + 2] = src[s];
+				out[d + 2] = src[s + b];
 				out[d + 3] = src[s + 3];
 			}
 		}
@@ -309,7 +324,9 @@ module.exports = (RED) => {
 					);
 					transparent = false;
 				}
-				const ext = format.toLowerCase();
+				// Raw bytes have no image container, so file mode writes .bin and
+				// the geometry travels on msg.images[] instead.
+				const ext = format === "RAW" ? "bin" : format.toLowerCase();
 
 				const openStart = performance.now();
 				const doc = await engine.library.loadDocument(pdfBuffer);
@@ -339,32 +356,52 @@ module.exports = (RED) => {
 							const rendered = await doc
 								.getPage(pageNum - 1)
 								.render({ scale, render: "bitmap", transparent });
+							const raw = format === "RAW";
 							const bitmap = toRgbaRotated(
 								rendered.data,
 								rendered.width,
 								rendered.height,
 								rotation,
+								!raw,
 							);
-							const encoder = engine.Transformer.fromRgbaPixels(
-								bitmap.data,
-								bitmap.width,
-								bitmap.height,
-							);
-							// jpegSync() matches MuPDF's quality scale closely (q85 lands
-							// within 0.2 dB PSNR) but produces 17-34% larger files. MozJPEG
-							// was measured as an alternative and rejected: recompressing via
-							// compressJpegSync() gains nothing, and @jsquash/jpeg encoding
-							// from raw pixels is only ~6% smaller for 7-11x the time.
-							const buffer =
-								format === "JPEG"
-									? encoder.jpegSync(quality)
-									: encoder.pngSync();
+							let buffer;
+							if (raw) {
+								buffer = Buffer.isBuffer(bitmap.data)
+									? bitmap.data
+									: Buffer.from(
+											bitmap.data.buffer,
+											bitmap.data.byteOffset,
+											bitmap.data.byteLength,
+										);
+							} else {
+								const encoder = engine.Transformer.fromRgbaPixels(
+									bitmap.data,
+									bitmap.width,
+									bitmap.height,
+								);
+								// jpegSync() matches MuPDF's quality scale closely (q85 lands
+								// within 0.2 dB PSNR) but produces 17-34% larger files. MozJPEG
+								// was measured as an alternative and rejected: recompressing via
+								// compressJpegSync() gains nothing, and @jsquash/jpeg encoding
+								// from raw pixels is only ~6% smaller for 7-11x the time.
+								buffer =
+									format === "JPEG"
+										? encoder.jpegSync(quality)
+										: encoder.pngSync();
+							}
 							const img = {
 								page: pageNum,
 								width: bitmap.width,
 								height: bitmap.height,
 								renderMs: performance.now() - pageStart,
 							};
+							if (raw) {
+								img.channels = 4;
+								// PDFium renders BGRA natively, so RAW skips the channel
+								// swap as well as the encode.
+								img.colorSpace = "BGRA";
+								img.dtype = "uint8";
+							}
 
 							// write immediately so file-only mode never holds every
 							// page's buffer in memory at once
@@ -402,15 +439,29 @@ module.exports = (RED) => {
 						throw new Error("no pages were rendered from the PDF");
 
 					const single = images.length === 1;
-					const payloads = images.map((img) =>
-						folder && node.outputMode === "file" ? img.path : img.buffer,
-					);
+					const payloads = images.map((img) => {
+						if (folder && node.outputMode === "file") return img.path;
+						if (format !== "RAW") return img.buffer;
+						// Shape expected by node-red-contrib-image-tools:
+						// {data, width, height, channels, colorSpace, dtype}
+						return {
+							data: img.buffer,
+							width: img.width,
+							height: img.height,
+							channels: img.channels,
+							colorSpace: img.colorSpace,
+							dtype: img.dtype,
+						};
+					});
 					const totalMs = performance.now() - totalStart;
 					const meta = {
 						images: images.map((img) => ({
 							page: img.page,
 							width: img.width,
 							height: img.height,
+							channels: img.channels,
+							colorSpace: img.colorSpace,
+							dtype: img.dtype,
 							filename: img.filename,
 							path: img.path,
 							renderMs: Math.round(img.renderMs),

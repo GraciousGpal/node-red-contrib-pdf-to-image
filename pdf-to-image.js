@@ -339,6 +339,11 @@ module.exports = (RED) => {
 								bitmap.width,
 								bitmap.height,
 							);
+							// jpegSync() matches MuPDF's quality scale closely (q85 lands
+							// within 0.2 dB PSNR) but produces 17-34% larger files. MozJPEG
+							// was measured as an alternative and rejected: recompressing via
+							// compressJpegSync() gains nothing, and @jsquash/jpeg encoding
+							// from raw pixels is only ~6% smaller for 7-11x the time.
 							const buffer =
 								format === "JPEG"
 									? encoder.jpegSync(quality)

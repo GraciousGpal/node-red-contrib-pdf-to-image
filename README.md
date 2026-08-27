@@ -128,9 +128,27 @@ Measured against the MuPDF build on the same machine, 3 pages at 200 DPI:
 
 ## Known gaps
 
-- **JPEG output is a regression.** At quality 85 this build produces 351 KB
-  where MuPDF produced 300 KB, and is slower (143 ms against 125 ms).
-  `@napi-rs/image` exposes MozJPEG options that have not been tuned yet.
+- **JPEG files are larger at equal quality.** The quality dial is not
+  mis-scaled — both encoders land at the same PSNR for the same setting
+  (q85 gives 40.17 dB here against MuPDF's 40.34 dB). `@napi-rs/image` is
+  simply less space-efficient: 17% larger on graphics-heavy pages and 31% –
+  34% larger on text-heavy ones, measured at matched PSNR.
+
+  The encoder itself is **2.3x faster** (31 ms against 74 ms for a
+  1629x1122 page); where end-to-end JPEG timings look slower it is PDFium's
+  rasterising of that page, not the encoding.
+
+  Alternatives were measured and rejected:
+
+  | Approach | Result |
+  | --- | --- |
+  | `compressJpegSync` (MozJPEG recompress) | No gain — 350 KB vs 351 KB at the same PSNR, 2.4x slower. Re-encoding an already-lossy JPEG cancels the benefit. |
+  | `@jsquash/jpeg` (MozJPEG from raw pixels) | ~6% smaller at matched PSNR but **7x – 11x slower** (232 – 354 ms). |
+
+  No permissive JPEG encoder tested matches MuPDF's efficiency at an
+  acceptable speed. If output size matters more than throughput for your
+  JPEG usage, this branch is a regression; for PNG it is a clear win.
+
 - **Output is 1px smaller in each dimension** (e.g. 2172x1497 against
   2173x1498) because PDFium rounds page sizes differently. Downstream
   template matching against golden images would need rebaselining.

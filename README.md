@@ -1,9 +1,5 @@
 # @graciousstar/node-red-contrib-pdf-to-image
 
-> **Branch build.** This is the `pdfium-mit` branch: MuPDF has been replaced
-> with PDFium plus a Rust encoder, so the package is MIT end to end with no
-> AGPL obligation. See **Licensing** below for what changed.
-
 A Node-RED node that converts a PDF into PNG/JPEG images using
 [PDFium](https://pdfium.googlesource.com/pdfium/) compiled to **WebAssembly**
 (via [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium)) for

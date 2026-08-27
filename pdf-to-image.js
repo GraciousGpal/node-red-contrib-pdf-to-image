@@ -5,7 +5,7 @@
  * compiled to WebAssembly - no native dependencies, so it runs anywhere
  * Node.js runs, including Alpine-based containers).
  *
- * Semantics follow the PDFprocessor reference app (PyMuPDF):
+ * Supported options:
  *   - page selection: all / first / last / range ("a-b", 1-indexed)
  *   - DPI scaling (default 200; PDFs are 72 DPI base)
  *   - PNG or JPEG output (JPEG quality 1-100)
@@ -266,7 +266,7 @@ module.exports = (RED) => {
 
 					const pageNumbers = resolvePageNumbers(node, totalPages, msg);
 					const scale = mupdf.Matrix.scale(dpi / 72, dpi / 72);
-					// reference app semantics: positive rotation = clockwise.
+					// Positive rotation = clockwise.
 					// MuPDF's Matrix.rotate() is counterclockwise, hence the negation.
 					const matrix = rotation
 						? mupdf.Matrix.concat(mupdf.Matrix.rotate(-rotation), scale)

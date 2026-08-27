@@ -5,9 +5,9 @@ A Node-RED node that converts a PDF into PNG/JPEG images using
 [`mupdf`](https://www.npmjs.com/package/mupdf) npm package) — no native
 dependencies, so it runs anywhere Node.js runs, including Alpine containers.
 
-Semantics mirror the PDFprocessor reference app (PyMuPDF): page selection,
-DPI scaling, PNG/JPEG output with quality, clockwise rotation, and the
-`<stem>_page_<n>.<ext>` file naming scheme with collision counters.
+Supports page selection, DPI scaling, PNG/JPEG output with quality,
+clockwise rotation, and the `<stem>_page_<n>.<ext>` file naming scheme
+with collision counters.
 
 ## Install
 
@@ -15,12 +15,12 @@ DPI scaling, PNG/JPEG output with quality, clockwise rotation, and the
 npm install node-red-contrib-pdf-to-image
 ```
 
-In this repo it is preinstalled as a local dependency — see the top-level
-README. Rebuild the image after changing it:
+Or install it from the Node-RED editor via **Manage palette → Install**.
+Restart Node-RED afterwards so the node is registered.
 
-```bash
-docker compose up -d --build
-```
+Running Node-RED in Docker? Add it to the image's `package.json` and rebuild
+(`docker compose up -d --build`) rather than installing into a container that
+gets replaced.
 
 ## Input
 
@@ -30,7 +30,7 @@ docker compose up -d --build
 | --- | --- |
 | `Buffer` / `Uint8Array` / `ArrayBuffer` | PDF bytes |
 | string starting with `%PDF` | base64-encoded PDF |
-| string path | PDF file read from disk (container filesystem) |
+| string path | PDF file read from disk, on the host running Node-RED |
 | string (base64) | base64-encoded PDF, auto-detected via the `%PDF` magic in the decoded bytes |
 | object `{ data }` / `{ buffer }` / `{ path }` | any of the above |
 
@@ -66,7 +66,55 @@ Optional per-message overrides: `msg.filename` (output file stem),
 ## Notes
 
 - Requires Node.js >= 18 (dynamic `import()` of the ESM-only `mupdf` package).
-- JPEG output uses MuPDF's `asJPEG(quality)`; the reference app's
-  progressive/optimize flags have no direct equivalent.
-- The destination folder is a path **inside the container** — use `/data` for
-  persistent storage.
+- JPEG output uses MuPDF's `asJPEG(quality)`; progressive and optimize
+  flags are not exposed.
+- The destination folder is a path on **whatever machine runs Node-RED**, not
+  on the machine with the browser open. Node-RED must have write permission to
+  it; the folder is created if missing. In Docker that path is inside the
+  container, so point it at a mounted volume such as `/data` if the images
+  need to outlive the container.
+
+## Licensing
+
+The code in this package is **MIT** (see `LICENSE`). The rendering engine it
+depends on is not.
+
+[`mupdf`](https://www.npmjs.com/package/mupdf) is **AGPL-3.0-or-later**, and
+npm installs it alongside this node. What that means in practice:
+
+- This package does not bundle or redistribute MuPDF — it calls it at
+  runtime — so the MIT license above covers the wrapper code only.
+- The *running combination* is covered by the AGPL. Node-RED is normally
+  reachable over a network, and AGPL section 13 entitles users who interact
+  with a program remotely to the corresponding source of that combined work.
+- Artifex, MuPDF's owner, sells commercial licenses for deployments where AGPL
+  terms do not fit.
+
+If you are running this in an open-source or internal-only Node-RED project,
+this needs no action from you. If you are embedding it in a closed-source
+product or a hosted service you sell, read the AGPL terms first.
+
+## Roadmap
+
+### Relicensing the whole stack under MIT
+
+The AGPL obligation comes entirely from the rendering engine, not from any
+code in this package — so replacing the engine removes it. The intended
+path is [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium)
+(MIT wrapper around Google's BSD-3-Clause PDFium), which is also WebAssembly
+and so preserves the no-native-dependencies property that lets this node run
+anywhere Node.js does.
+
+Scope of the change:
+
+- Swap the engine calls in `pdf-to-image.js`. MuPDF is touched in only a few
+  places: document open, `countPages()`, `Matrix` DPI scaling and rotation,
+  and pixmap encoding.
+- Supply an image encoder. MuPDF gives us `asPNG()` / `asJPEG(quality)` for
+  free; PDFium renders to a raw bitmap, so encoding becomes this package's
+  job. It needs a permissive, pure-JS or WASM encoder (`pngjs`, `jpeg-js`)
+  rather than a native one like `sharp`, or the portability gain is lost.
+- Confirm rendering fidelity and per-page timings match the current output
+  before making the swap the default.
+
+Until that lands, treat the effective license of a deployed instance as AGPL.

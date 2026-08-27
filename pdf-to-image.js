@@ -442,7 +442,7 @@ module.exports = (RED) => {
 					const payloads = images.map((img) => {
 						if (folder && node.outputMode === "file") return img.path;
 						if (format !== "RAW") return img.buffer;
-						// Shape expected by node-red-contrib-image-tools:
+						// Bitmap plus the geometry needed to interpret it:
 						// {data, width, height, channels, colorSpace, dtype}
 						return {
 							data: img.buffer,

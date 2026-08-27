@@ -1,14 +1,18 @@
 # @graciousstar/node-red-contrib-pdf-to-image
 
-A Node-RED node that converts a PDF into PNG/JPEG images using
+A Node-RED node that converts a PDF into images using
 [PDFium](https://pdfium.googlesource.com/pdfium/) compiled to **WebAssembly**
 (via [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium)) for
 rasterising, and [`@napi-rs/image`](https://www.npmjs.com/package/@napi-rs/image)
-for PNG/JPEG encoding.
+for encoding.
 
-Supports page selection, DPI scaling, PNG/JPEG output with quality,
-clockwise rotation, and the `<stem>_page_<n>.<ext>` file naming scheme
-with collision counters.
+Outputs **PNG**, **JPEG**, or **RAW** — raw skips encoding altogether and
+hands the bitmap to the next node, which is 1.9x – 3.1x faster in a
+processing chain.
+
+Supports page selection, DPI scaling, JPEG quality, transparent backgrounds,
+clockwise rotation, and the `<stem>_page_<n>.<ext>` file naming scheme with
+collision counters.
 
 ## Install
 
@@ -50,9 +54,8 @@ bitmap to the next node. Encoding is most of the cost of a render, so this is
 the fastest option when the image feeds another processing node rather than
 being written out or displayed.
 
-`msg.payload` becomes an object rather than a Buffer, in the shape
-[`node-red-contrib-image-tools`](https://www.npmjs.com/package/@rosepetal/node-red-contrib-image-tools)
-expects:
+`msg.payload` becomes an object rather than a Buffer, carrying the bitmap
+alongside the geometry needed to interpret it:
 
 ```javascript
 {
@@ -65,9 +68,8 @@ expects:
 }
 ```
 
-PDFium renders BGRA natively, which that node lists among its supported colour
-spaces, so nothing is converted. At rotation 0 the render buffer is passed
-through with no copy at all.
+PDFium renders BGRA natively, so nothing is converted. At rotation 0 the
+render buffer is passed through with no copy at all.
 
 Measured against PNG, 3 pages, median of 3:
 
@@ -129,8 +131,8 @@ silently come out black.
 
 - Requires Node.js >= 18. Both engine packages expose CommonJS entry points.
 - JPEG output uses `@napi-rs/image`'s `jpegSync(quality)`. At the same
-  quality setting it currently produces larger files than the MuPDF build
-  did — see **Known gaps** below.
+  quality setting it produces larger files than releases before 1.5.0 did —
+  see **Known gaps** below.
 - The destination folder is a path on **whatever machine runs Node-RED**, not
   on the machine with the browser open. Node-RED must have write permission to
   it; the folder is created if missing. In Docker that path is inside the
@@ -148,10 +150,10 @@ licensed:
 | `@hyzyla/pdfium` | rasterising | MIT (over BSD-3-Clause PDFium) |
 | `@napi-rs/image` | PNG/JPEG encoding | MIT |
 
-There is no AGPL obligation. The `main` branch depends on `mupdf`
-(AGPL-3.0-or-later), which covers the running combination and requires
-offering source to users who reach it over a network; that constraint does
-not apply here.
+There is no AGPL obligation. Releases before 1.5.0 rasterised with `mupdf`
+(AGPL-3.0-or-later), which covered the running combination and required
+offering source to users who reached it over a network. Upgrading to 1.5.0 or
+later removes that constraint.
 
 `@napi-rs/image` is a Node-API addon rather than pure WebAssembly. It ships
 13 prebuilt targets — including `linux-x64-musl` and `linux-arm64-musl`
@@ -159,11 +161,20 @@ not apply here.
 Pi, and a `wasm32-wasi` fallback — so nothing is compiled at install time and
 no toolchain is required.
 
+## Version history
+
+| Version | Change |
+| --- | --- |
+| 1.6.0 | RAW output format, which skips encoding entirely |
+| 1.5.0 | Rasterising moved from MuPDF to PDFium and encoding to a Rust encoder, making the package MIT throughout; transparent background option added |
+| 1.0.x | Initial releases, rasterising with MuPDF |
+
 ## Verification
 
-Rendered output was compared against the MuPDF implementation by
-downsampling both to an 8x8 luminance grid, which tolerates antialiasing and
-the 1px size difference but not a wrong orientation:
+When rasterising moved to PDFium in 1.5.0, output was compared against the
+previous implementation by downsampling both to an 8x8 luminance grid, which
+tolerates antialiasing and the 1px size difference but not a wrong
+orientation:
 
 | Rotation | Mean difference (0-255) | Result |
 | --- | --- | --- |
@@ -176,16 +187,22 @@ A control comparing rot0 against rot90 from the same engine scores 43.0,
 confirming the check can actually detect a mismatch. The residual ~3.1 is
 rasteriser variance, present at rotation 0 where no rotation is applied.
 
-Measured against the MuPDF build on the same machine, 3 pages at 200 DPI:
-332 ms against 446 ms, a 26% improvement.
+The check earned its keep: an early revision had the 90/270 direction
+inverted. Output dimensions were correct and every smoke test passed, so
+nothing else would have caught it.
+
+RAW payloads are checked separately for geometry consistency — `data.length`
+must equal `width * height * channels` — at every rotation and with
+transparency on and off.
 
 ## Known gaps
 
 - **JPEG files are larger at equal quality.** The quality dial is not
   mis-scaled — both encoders land at the same PSNR for the same setting
-  (q85 gives 40.17 dB here against MuPDF's 40.34 dB). `@napi-rs/image` is
-  simply less space-efficient: 17% larger on graphics-heavy pages and 31% –
-  34% larger on text-heavy ones, measured at matched PSNR.
+  (q85 gives 40.17 dB against the pre-1.5.0 build's 40.34 dB).
+  `@napi-rs/image` is simply less space-efficient: 17% larger on
+  graphics-heavy pages and 31% – 34% larger on text-heavy ones, measured at
+  matched PSNR.
 
   The encoder itself is **2.3x faster** (31 ms against 74 ms for a
   1629x1122 page); where end-to-end JPEG timings look slower it is PDFium's
@@ -198,15 +215,16 @@ Measured against the MuPDF build on the same machine, 3 pages at 200 DPI:
   | `compressJpegSync` (MozJPEG recompress) | No gain — 350 KB vs 351 KB at the same PSNR, 2.4x slower. Re-encoding an already-lossy JPEG cancels the benefit. |
   | `@jsquash/jpeg` (MozJPEG from raw pixels) | ~6% smaller at matched PSNR but **7x – 11x slower** (232 – 354 ms). |
 
-  No permissive JPEG encoder tested matches MuPDF's efficiency at an
-  acceptable speed. If output size matters more than throughput for your
-  JPEG usage, this branch is a regression; for PNG it is a clear win.
+  No permissive JPEG encoder tested matches the old encoder's efficiency at an
+  acceptable speed. If JPEG output size matters more to you than throughput,
+  1.5.0 onwards is a regression on that one axis; PNG and RAW are clear wins.
 
-- **Output is 1px smaller in each dimension** (e.g. 2172x1497 against
-  2173x1498) because PDFium rounds page sizes differently. Anything holding a
-  golden image produced by the MuPDF build would need rebaselining. Note this
-  does not affect the NodeRed-Test palette repo, whose `golden-compare`
-  template is a camera capture and is not fed from this node.
-- The installed binary is 16.5 MB, against 12.5 KB for the `main` package.
+- **Output is 1px smaller in each dimension** since 1.5.0 (e.g. 2172x1497
+  against 2173x1498), because PDFium rounds page sizes differently. Anything
+  holding a golden image produced by an earlier release would need
+  rebaselining.
+- **RAW payloads are large** — three pages at 300 DPI is roughly 84 MB, and a
+  text-heavy A4 document reaches ~99 MB. See **RAW output** above.
+- The installed native binary is around 16.5 MB.
 - Installing with `--omit=optional` leaves `@napi-rs/image` unable to find
   its native binding, failing at require time rather than install time.

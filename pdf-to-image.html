@@ -124,8 +124,8 @@
 
 <script type="text/html" data-help-name="pdf-to-image">
   <p>
-    Converts a PDF into one image per page (PNG or JPEG) using the PDFium
-    rendering engine. Options: page selection, DPI, output format, JPEG quality and
+    Converts a PDF into one image per page (PNG, JPEG, or RAW) using the
+    PDFium rendering engine. Options: page selection, DPI, output format, JPEG quality and
     clockwise rotation.
   </p>
 
@@ -210,8 +210,8 @@
     node rather than being written out or displayed.
   </p>
   <p>
-    <code>msg.payload</code> becomes an object rather than a Buffer, in the
-    shape <code>node-red-contrib-image-tools</code> expects:
+    <code>msg.payload</code> becomes an object rather than a Buffer, carrying
+    the bitmap alongside the geometry needed to interpret it:
   </p>
   <pre>{
   data: Buffer,       // BGRA bytes, 4 per pixel

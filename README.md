@@ -109,16 +109,60 @@ path is [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium)
 and so preserves the no-native-dependencies property that lets this node run
 anywhere Node.js does.
 
-Scope of the change:
+PDFium renders to a raw BGRA bitmap, so PNG encoding — which MuPDF gives us
+for free via `asPNG()` — becomes this package's job. Choosing that encoder
+turns out to matter far more than choosing the engine.
+
+#### Measured
+
+Two PDFs (a graphics-heavy 3.3 MB sample and a text/vector-heavy 4.2 MB
+document), first 3 pages, median of 3 runs, Node 24, WASM library
+initialisation hoisted out of the timing:
+
+| Pipeline | Time vs current | PNG size vs current |
+| --- | --- | --- |
+| `mupdf` + `asPNG()` (current) | 1.00x | 1.00x |
+| PDFium + [`@jsquash/png`](https://www.npmjs.com/package/@jsquash/png) | **0.63x – 0.93x** | 2.5x – 4.1x |
+| PDFium + [`fast-png`](https://www.npmjs.com/package/fast-png) | 2.1x – 2.8x | 0.96x – 1.33x |
+
+Findings:
+
+- **Rasterising is at parity.** PDFium is within 0.86x – 1.3x of MuPDF on the
+  text-heavy document and up to 2.7x slower on heavy vector graphics. The
+  engine was never the bottleneck.
+- **The encoder decides everything.** At 300 DPI, PNG encoding is ~90% of the
+  total. `@jsquash/png` (WASM) beats MuPDF's own C encoder by 2x – 2.6x, but
+  spends almost no effort compressing, so files run 2.5x – 4.1x larger. It
+  exposes no quality knob: the API is `encode(data, width, height, bitDepth)`.
+- **`fast-png` is the size-neutral option**, matching MuPDF's output within
+  a third at 2x – 3x the time. It is pure JS.
+- **`oxipng` is not viable in a render path.** Level 0 costs 3.3x – 4.9x
+  MuPDF's time for 1.06x – 1.18x the size; level 2 costs 22x – 24x; level 3
+  costs 67x – 72x for ~1% over level 2. Encoding with `@jsquash/png` and then
+  optimising with `oxipng` lands at 23x – 25x, so the speed lead cannot be
+  spent to buy the size back.
+- **MuPDF's `asPNG()` is genuinely strong.** At 300 DPI it produced 377 KB
+  where every permissive encoder needed 400 – 500 KB. This is not a weak
+  component being replaced.
+
+#### Remaining work
 
 - Swap the engine calls in `pdf-to-image.js`. MuPDF is touched in only a few
   places: document open, `countPages()`, `Matrix` DPI scaling and rotation,
   and pixmap encoding.
-- Supply an image encoder. MuPDF gives us `asPNG()` / `asJPEG(quality)` for
-  free; PDFium renders to a raw bitmap, so encoding becomes this package's
-  job. It needs a permissive, pure-JS or WASM encoder (`pngjs`, `jpeg-js`)
-  rather than a native one like `sharp`, or the portability gain is lost.
-- Confirm rendering fidelity and per-page timings match the current output
-  before making the swap the default.
+- Pick the encoder against the deployment. `@jsquash/png` makes the node
+  *faster* than it is today and suits **message** output mode, where buffers
+  are passed in memory to the next node. `fast-png` suits **file** output
+  mode, where a 3x – 4x larger PNG per page is a real cost on disk.
+- Supply a JPEG encoder. `asJPEG(quality)` disappears with MuPDF; `jpeg-js`
+  (BSD-3-Clause) is the permissive equivalent, and is not yet benchmarked.
+- Regenerate any golden templates. PDFium's output is consistently **1px
+  smaller** in each dimension (e.g. 1086x748 against MuPDF's 1087x749) due to
+  different page-size rounding, so downstream template matching would need
+  rebaselining.
 
-Until that lands, treat the effective license of a deployed instance as AGPL.
+Avoid `sharp` despite its speed: it is native, and would end the "runs
+anywhere Node.js runs, including Alpine" property that makes this node
+portable.
+
+Until this lands, treat the effective license of a deployed instance as AGPL.

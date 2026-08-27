@@ -255,6 +255,7 @@ module.exports = (RED) => {
 		node.folder = String(config.folder || "").trim();
 		node.stem = String(config.stem || "").trim();
 		node.splitPages = !!config.splitPages;
+		node.transparent = !!config.transparent;
 
 		node.on("input", async (msg, send, done) => {
 			send =
@@ -298,6 +299,16 @@ module.exports = (RED) => {
 					msg.rotation != null ? msg.rotation : node.rotation,
 					node.rotation,
 				);
+				// JPEG has no alpha channel, so a transparent background there
+				// would silently render as black. Force it off and say so.
+				let transparent =
+					msg.transparent != null ? !!msg.transparent : node.transparent;
+				if (transparent && format === "JPEG") {
+					node.warn(
+						"[pdf-to-image] transparent background is not supported for JPEG - rendering on white",
+					);
+					transparent = false;
+				}
 				const ext = format.toLowerCase();
 
 				const openStart = performance.now();
@@ -327,7 +338,7 @@ module.exports = (RED) => {
 						{
 							const rendered = await doc
 								.getPage(pageNum - 1)
-								.render({ scale, render: "bitmap" });
+								.render({ scale, render: "bitmap", transparent });
 							const bitmap = toRgbaRotated(
 								rendered.data,
 								rendered.width,
@@ -409,6 +420,7 @@ module.exports = (RED) => {
 						dpi,
 						format,
 						rotation,
+						transparent,
 						filename: outStem,
 						durationMs: Math.round(totalMs),
 						timings: {

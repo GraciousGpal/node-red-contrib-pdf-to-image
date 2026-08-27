@@ -45,7 +45,15 @@ gets replaced.
 
 Optional per-message overrides: `msg.filename` (output file stem),
 `msg.dpi`, `msg.format`, `msg.rotation`, `msg.jpegQuality`,
-`msg.pageMode`, `msg.pageRange`.
+`msg.pageMode`, `msg.pageRange`, `msg.transparent`.
+
+### Transparent background
+
+Pages render onto white by default. Enable **Transparent background** (or set
+`msg.transparent`) to keep the page background transparent in the PNG alpha
+channel. JPEG has no alpha channel, so the option is ignored with a warning
+when the output format is JPEG — otherwise a transparent background would
+silently come out black.
 
 ## Output
 
@@ -53,7 +61,7 @@ Optional per-message overrides: `msg.filename` (output file stem),
   **file** mode it is the written path / array of paths instead
 - `msg.images` — array of `{ page, width, height, filename, path }`
 - `msg.pageCount`, `msg.pages`, `msg.dpi`, `msg.format`, `msg.rotation`,
-  `msg.filename`, `msg.durationMs`
+  `msg.filename`, `msg.transparent`, `msg.durationMs`
 - `msg.timings` — phase breakdown in ms:
   `{ openMs, renderMs, renderPerPageMs, saveMs, totalMs }`; each
   `msg.images[i]` entry also carries its own `renderMs`
@@ -150,11 +158,10 @@ Measured against the MuPDF build on the same machine, 3 pages at 200 DPI:
   JPEG usage, this branch is a regression; for PNG it is a clear win.
 
 - **Output is 1px smaller in each dimension** (e.g. 2172x1497 against
-  2173x1498) because PDFium rounds page sizes differently. Downstream
-  template matching against golden images would need rebaselining.
-- **The `mupdf` `alpha` argument is gone.** PDFium always renders BGRA and
-  the channel swap is done in-process; `transparent` is not yet plumbed
-  through to the node's options.
+  2173x1498) because PDFium rounds page sizes differently. Anything holding a
+  golden image produced by the MuPDF build would need rebaselining. Note this
+  does not affect the NodeRed-Test palette repo, whose `golden-compare`
+  template is a camera capture and is not fed from this node.
 - The installed binary is 16.5 MB, against 12.5 KB for the `main` package.
 - Installing with `--omit=optional` leaves `@napi-rs/image` unable to find
   its native binding, failing at require time rather than install time.

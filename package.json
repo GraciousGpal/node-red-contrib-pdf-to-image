@@ -1,7 +1,7 @@
 {
   "name": "@graciousstar/node-red-contrib-pdf-to-image",
   "version": "1.0.2",
-  "description": "Convert a PDF into PNG/JPEG images (page selection, DPI, rotation). Uses MuPDF compiled to WebAssembly - no native dependencies.",
+  "description": "Convert a PDF into PNG/JPEG images (page selection, DPI, rotation). Uses PDFium (WebAssembly) and a Rust encoder - fully MIT-compatible, no AGPL.",
   "author": "GraciousGpal (https://github.com/GraciousGpal)",
   "license": "MIT",
   "publishConfig": {
@@ -24,7 +24,7 @@
     "jpg",
     "convert",
     "render",
-    "mupdf"
+    "pdfium"
   ],
   "files": [
     "pdf-to-image.js",
@@ -43,6 +43,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "mupdf": "^1.28.0"
+    "@hyzyla/pdfium": "^2.1.13",
+    "@napi-rs/image": "^1.14.0"
   }
 }

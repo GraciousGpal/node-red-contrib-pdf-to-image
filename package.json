@@ -4,14 +4,13 @@
   "description": "Convert a PDF into PNG/JPEG images (page selection, DPI, rotation). Uses MuPDF compiled to WebAssembly - no native dependencies.",
   "author": "GraciousGpal (https://github.com/GraciousGpal)",
   "license": "MIT",
-  "homepage": "https://github.com/GraciousGpal/NodeRed-Test/tree/main/nodes/node-red-contrib-pdf-to-image",
+  "homepage": "https://github.com/GraciousGpal/node-red-contrib-pdf-to-image#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GraciousGpal/NodeRed-Test.git",
-    "directory": "nodes/node-red-contrib-pdf-to-image"
+    "url": "git+https://github.com/GraciousGpal/node-red-contrib-pdf-to-image.git"
   },
   "bugs": {
-    "url": "https://github.com/GraciousGpal/NodeRed-Test/issues"
+    "url": "https://github.com/GraciousGpal/node-red-contrib-pdf-to-image/issues"
   },
   "keywords": [
     "node-red",
